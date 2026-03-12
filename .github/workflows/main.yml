@@ -1,0 +1,74 @@
+name: 5 Parallel
+
+on:
+  workflow_dispatch:
+    inputs:
+      crd_code_1:
+        description: 'CRD Auth Code for Device 1 (Required)'
+        required: true
+        type: string
+      crd_code_2:
+        description: 'CRD Auth Code for Device 2 (Optional)'
+        required: false
+        type: string
+      crd_code_3:
+        description: 'CRD Auth Code for Device 3 (Optional)'
+        required: false
+        type: string
+      crd_code_4:
+        description: 'CRD Auth Code for Device 4 (Optional)'
+        required: false
+        type: string
+      crd_code_5:
+        description: 'CRD Auth Code for Device 5 (Optional)'
+        required: false
+        type: string
+
+jobs:
+  remote_session:
+    name: Remote Session ${{ matrix.device }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    
+    # 🔴 This is the magic line. It will SKIP the runner entirely if the Auth token is empty.
+    if: matrix.crd_code != ''
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - device: 1
+            crd_code: ${{ github.event.inputs.crd_code_1 }}
+          - device: 2
+            crd_code: ${{ github.event.inputs.crd_code_2 }}
+          - device: 3
+            crd_code: ${{ github.event.inputs.crd_code_3 }}
+          - device: 4
+            crd_code: ${{ github.event.inputs.crd_code_4 }}
+          - device: 5
+            crd_code: ${{ github.event.inputs.crd_code_5 }}
+
+    steps:
+      - name: Install and Start Chrome Remote Desktop
+        shell: pwsh
+        run: |
+          Write-Host "Installing and configuring CRD for Device ${{ matrix.device }}..."
+          
+          Invoke-WebRequest -Uri "https://dl.google.com/dl/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd_host.msi"
+          
+          Start-Process msiexec.exe -Wait -ArgumentList '/i crd_host.msi /quiet'
+          
+          & "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe" --code="${{ matrix.crd_code }}" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="${{ env.COMPUTERNAME }}-${{ matrix.device }}" --pin="112233"
+          
+          Write-Host "=============================================="
+          Write-Host "✅ Chrome Remote Desktop is configured."
+          Write-Host "   Connect to: ${{ env.COMPUTERNAME }}-${{ matrix.device }}"
+          Write-Host "   Access PIN: 112233"
+          Write-Host "=============================================="
+          
+      - name: Keep Runner Alive
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "Session is active. This runner will remain online until the job timeout is reached."
+          Start-Sleep -Seconds 3600
