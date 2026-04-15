@@ -1,0 +1,209 @@
+name: Parallel 1-5 (CRD Windows + GoLogin)
+
+on:
+  workflow_dispatch:
+    inputs:
+      crd_pin:
+        description: 'Chrome Remote Desktop PIN (6 digits)'
+        required: true
+        type: string
+        default: '123456'
+      crd_auth_1:
+        description: 'CRD Auth Code 1 (Required) [Paste full command or 4/xxx code]'
+        required: true
+        type: string
+      crd_auth_2:
+        description: 'CRD Auth Code 2 (Optional)'
+        required: false
+        type: string
+      crd_auth_3:
+        description: 'CRD Auth Code 3 (Optional)'
+        required: false
+        type: string
+      crd_auth_4:
+        description: 'CRD Auth Code 4 (Optional)'
+        required: false
+        type: string
+      crd_auth_5:
+        description: 'CRD Auth Code 5 (Optional)'
+        required: false
+        type: string
+      gologin_email:
+        description: 'GoLogin Account Email (Required)'
+        required: true
+        type: string
+      gologin_password:
+        description: 'GoLogin Account Password (Required)'
+        required: true
+        type: string
+
+jobs:
+  prepare_matrix:
+    name: Check Inputs & Prepare Runners
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Generate Dynamic Matrix
+        id: set-matrix
+        shell: python
+        env:
+          CRD_1: ${{ inputs.crd_auth_1 }}
+          CRD_2: ${{ inputs.crd_auth_2 }}
+          CRD_3: ${{ inputs.crd_auth_3 }}
+          CRD_4: ${{ inputs.crd_auth_4 }}
+          CRD_5: ${{ inputs.crd_auth_5 }}
+        run: |
+          import os, json, re
+          devices = {
+              "1": os.environ.get("CRD_1", "").strip(),
+              "2": os.environ.get("CRD_2", "").strip(),
+              "3": os.environ.get("CRD_3", "").strip(),
+              "4": os.environ.get("CRD_4", "").strip(),
+              "5": os.environ.get("CRD_5", "").strip(),
+          }
+          includes =[]
+          for dev, auth in devices.items():
+              if auth:
+                  # Smartly extract just the '4/xxx' code if user pasted the full Google command
+                  code = auth
+                  match_quotes = re.search(r'--code="(4/[^"]+)"', auth)
+                  match_no_quotes = re.search(r'--code=(4/[^\s]+)', auth)
+                  if match_quotes:
+                      code = match_quotes.group(1)
+                  elif match_no_quotes:
+                      code = match_no_quotes.group(1)
+                  
+                  includes.append({"device": dev, "crd_auth": code})
+          
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps({'include': includes})}\n")
+
+  remote_session:
+    name: Remote Session ${{ matrix.device }}
+    needs: prepare_matrix
+    runs-on: windows-latest
+    timeout-minutes: 60
+    
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare_matrix.outputs.matrix) }}
+
+    steps:
+      - name: Install and Start Chrome Remote Desktop
+        shell: pwsh
+        run: |
+          Write-Host "Downloading Chrome Remote Desktop..."
+          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
+          
+          Write-Host "Installing Chrome Remote Desktop..."
+          Start-Process msiexec.exe -ArgumentList "/i crd.msi /qn" -Wait
+          
+          Write-Host "Configuring Registry for Headless Session..."
+          New-ItemProperty -Path "HKLM:\Software\Policies\Google\Chrome" -Name "RemoteAccessHostRequireCurtain" -PropertyType String -Value "0" -Force | Out-Null
+          
+          $DeviceName = "$env:COMPUTERNAME-Dev${{ matrix.device }}"
+          $StartHostPath = (Get-ChildItem -Path "C:\Program Files*\Google\Chrome Remote Desktop\*\remoting_start_host.exe" | Select-Object -First 1).FullName
+          
+          Write-Host "Registering Chrome Remote Desktop Host ($DeviceName)..."
+          & $StartHostPath --code="${{ matrix.crd_auth }}" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$DeviceName" --pin="${{ inputs.crd_pin }}"
+          
+          Write-Host "✅ Chrome Remote Desktop is online and ready for connection."
+          
+      - name: Download, Install, and Open GoLogin
+        shell: pwsh
+        run: |
+          Write-Host "Downloading GoLogin for Windows..."
+          Invoke-WebRequest -Uri "https://dl.gologin.com/gologin.exe" -OutFile "gologin_installer.exe"
+          
+          Write-Host "Installing GoLogin..."
+          Start-Process -FilePath ".\gologin_installer.exe" -ArgumentList "/S" -Wait
+          
+          Write-Host "Launching GoLogin..."
+          Start-Process "$env:USERPROFILE\AppData\Local\Programs\GoLogin\GoLogin.exe"
+          
+          Write-Host "✅ GoLogin installed and opened!"
+
+      - name: Automate GoLogin Login & Handle Captcha
+        shell: pwsh
+        env:
+          GOLOGIN_EMAIL: ${{ inputs.gologin_email }}
+          GOLOGIN_PASSWORD: ${{ inputs.gologin_password }}
+        run: |
+          Write-Host "Installing Python UI Automation tools..."
+          pip install pyautogui pygetwindow
+          
+          Write-Host "Running Automation Script..."
+          python -c "
+          import pyautogui
+          import pygetwindow as gw
+          import time
+          import os
+          
+          print('Waiting 15 seconds for GoLogin window to appear...')
+          time.sleep(15)
+          
+          windows = gw.getWindowsWithTitle('Gologin')
+          if windows:
+              win = windows[0]
+              try:
+                  win.activate()
+                  win.maximize()
+              except:
+                  pass
+              time.sleep(3)
+              
+              print('Navigating to Login page...')
+              pyautogui.press('tab', presses=8, interval=0.5)
+              pyautogui.press('enter')
+              
+              time.sleep(5)
+              
+              print('Entering credentials...')
+              pyautogui.write(os.environ['GOLOGIN_EMAIL'])
+              pyautogui.press('tab')
+              
+              pyautogui.write(os.environ['GOLOGIN_PASSWORD'])
+              
+              print('Clicking Login...')
+              pyautogui.press('enter')
+              
+              # Wait to see if Cloudflare Captcha appears
+              print('Waiting 5 seconds to check for Cloudflare Captcha...')
+              time.sleep(5)
+              
+              # Attempt to interact with Captcha if it is blocking
+              cx = win.left + (win.width // 2)
+              cy = win.top + (win.height // 2)
+              
+              print('Triggering potential Captcha verification...')
+              # Click center-bottom where the checkbox usually appears
+              pyautogui.click(cx, cy + 100)
+              time.sleep(0.5)
+              pyautogui.click(cx, cy + 150)
+              
+              # Use Tab & Space as a fallback to activate the checkbox
+              pyautogui.press('tab')
+              pyautogui.press('space')
+              
+              print('Waiting 10 seconds for Captcha approval...')
+              time.sleep(10)
+              
+              print('Clicking Login again...')
+              # Hit Enter again (to submit the login form after Captcha is bypassed)
+              pyautogui.press('enter')
+              
+              # Also click slightly below the center where the Login button might be
+              pyautogui.click(cx, cy + 50)
+              
+              print('✅ Login sequence completed.')
+          else:
+              print('❌ Could not find GoLogin window.')
+          "
+
+      - name: Keep Runner Alive
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "Session is active. Connect via https://remotedesktop.google.com/access"
+          Start-Sleep -Seconds 3600
