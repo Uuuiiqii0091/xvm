@@ -97,7 +97,7 @@ jobs:
           Write-Host "Configuring Registry for Headless Session..."
           New-ItemProperty -Path "HKLM:\Software\Policies\Google\Chrome" -Name "RemoteAccessHostRequireCurtain" -PropertyType String -Value "0" -Force | Out-Null
           
-          # Sets device name to strictly 1, 2, 3, 4, or 5 based on matrix
+          # Sets device name to strictly 1, 2, 3, 4, or 5
           $DeviceName = "${{ matrix.device }}"
           $StartHostPath = (Get-ChildItem -Path "C:\Program Files*\Google\Chrome Remote Desktop\*\remoting_start_host.exe" | Select-Object -First 1).FullName
           
@@ -121,7 +121,7 @@ jobs:
           
           Write-Host "✅ GoLogin installed and opened!"
 
-      - name: Automate GoLogin Login & Handle Captcha (Mouse Driven)
+      - name: Automate GoLogin Login & Handle Captcha
         shell: pwsh
         env:
           GOLOGIN_EMAIL: ${{ inputs.gologin_email }}
@@ -159,37 +159,31 @@ jobs:
               print('Entering credentials...')
               pyautogui.write(os.environ['GOLOGIN_EMAIL'])
               pyautogui.press('tab')
+              
               pyautogui.write(os.environ['GOLOGIN_PASSWORD'])
               
-              # Calculate Window Center for relative clicks
-              cx = win.left + (win.width // 2)
-              cy = win.top + (win.height // 2)
-              
-              # Define relative targets based on maximizing screen
-              login_btn_x = cx
-              login_btn_y = cy + 100
-              
-              captcha_box_x = cx - 130
-              captcha_box_y = cy + 200
-              
-              print('Moving mouse to Login button...')
-              # Moving mouse with duration acts as human-behavior for Cloudflare
-              pyautogui.moveTo(login_btn_x, login_btn_y, duration=1.0)
-              pyautogui.click()
+              print('Submitting first Login attempt...')
+              pyautogui.press('enter')
               
               print('Waiting 5 seconds for Cloudflare Captcha...')
               time.sleep(5)
               
-              print('Moving mouse to the Captcha checkbox...')
-              pyautogui.moveTo(captcha_box_x, captcha_box_y, duration=1.5)
-              pyautogui.click()
+              print('Navigating to Captcha box (5 TABs)...')
+              pyautogui.press('tab', presses=5, interval=0.5)
               
-              print('Waiting 10 seconds for Success message...')
+              print('Pressing SPACE to verify human...')
+              pyautogui.press('space')
+              
+              print('Waiting 10 seconds for Success checkmark...')
               time.sleep(10)
               
-              print('Moving mouse back to Login button and clicking again...')
-              pyautogui.moveTo(login_btn_x, login_btn_y, duration=1.0)
-              pyautogui.click()
+              print('Navigating to Login button (4 TABs)...')
+              pyautogui.press('tab', presses=4, interval=0.5)
+              
+              print('Pressing SPACE to submit Login again...')
+              pyautogui.press('space')
+              # Sending an extra enter just to be safe
+              pyautogui.press('enter')
               
               print('✅ Login sequence completed.')
           else:
