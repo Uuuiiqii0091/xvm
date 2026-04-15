@@ -1,0 +1,113 @@
+name: Parallel 1-5 (Remote.It Windows + GoLogin)
+
+on:
+  workflow_dispatch:
+    inputs:
+      remoteit_claim:
+        description: 'Remote.It Claim Code (Required)'
+        required: true
+        type: string
+      device_1:
+        description: 'Spawn Device 1?'
+        required: false
+        type: boolean
+        default: true
+      device_2:
+        description: 'Spawn Device 2?'
+        required: false
+        type: boolean
+        default: false
+      device_3:
+        description: 'Spawn Device 3?'
+        required: false
+        type: boolean
+        default: false
+      device_4:
+        description: 'Spawn Device 4?'
+        required: false
+        type: boolean
+        default: false
+      device_5:
+        description: 'Spawn Device 5?'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  prepare_matrix:
+    name: Check Inputs & Prepare Runners
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Generate Dynamic Matrix
+        id: set-matrix
+        shell: python
+        env:
+          CLAIM: ${{ inputs.remoteit_claim }}
+          D1: ${{ inputs.device_1 }}
+          D2: ${{ inputs.device_2 }}
+          D3: ${{ inputs.device_3 }}
+          D4: ${{ inputs.device_4 }}
+          D5: ${{ inputs.device_5 }}
+        run: |
+          import os, json
+          claim = os.environ.get("CLAIM", "").strip()
+          devices = {
+              "1": os.environ.get("D1") == "true",
+              "2": os.environ.get("D2") == "true",
+              "3": os.environ.get("D3") == "true",
+              "4": os.environ.get("D4") == "true",
+              "5": os.environ.get("D5") == "true"
+          }
+          includes =[]
+          for dev, is_active in devices.items():
+              if is_active and claim:
+                  includes.append({"device": dev, "claim": claim})
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps({'include': includes})}\n")
+
+  remote_session:
+    name: Remote Session ${{ matrix.device }}
+    needs: prepare_matrix
+    runs-on: windows-latest
+    timeout-minutes: 60
+    
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare_matrix.outputs.matrix) }}
+
+    steps:
+      - name: Install and Start Remote.It
+        shell: pwsh
+        run: |
+          $DeviceName = "Win-Runner-Dev${{ matrix.device }}"
+          Write-Host "Downloading and installing Remote.It for $DeviceName..."
+          
+          Invoke-WebRequest -Uri "https://downloads.remote.it/remoteit/install_agent.ps1" -OutFile "install_agent.ps1"
+          
+          $env:R3_DEVICE_NAME = $DeviceName
+          .\install_agent.ps1 -c "${{ matrix.claim }}"
+          
+          Write-Host "✅ Remote.It is configured and running. RDP Service should be available."
+          
+      - name: Download, Install, and Open GoLogin
+        shell: pwsh
+        run: |
+          Write-Host "Downloading GoLogin for Windows..."
+          Invoke-WebRequest -Uri "https://dl.gologin.com/gologin.exe" -OutFile "gologin_installer.exe"
+          
+          Write-Host "Installing GoLogin..."
+          Start-Process -FilePath ".\gologin_installer.exe" -ArgumentList "/S" -Wait
+          
+          Write-Host "Launching GoLogin..."
+          Start-Process "$env:USERPROFILE\AppData\Local\Programs\GoLogin\GoLogin.exe"
+          
+          Write-Host "✅ GoLogin installed and opened!"
+          
+      - name: Keep Runner Alive
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "Session is active. Open the Remote.It desktop app to connect via RDP."
+          Start-Sleep -Seconds 3600
