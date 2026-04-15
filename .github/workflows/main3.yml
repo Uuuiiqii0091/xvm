@@ -1,4 +1,4 @@
-name: Parallel 1-5 (Chrome Remote Desktop + GoLogin)
+name: Parallel 1-5 (CRD Windows + GoLogin)
 
 on:
   workflow_dispatch:
