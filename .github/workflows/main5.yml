@@ -1,8 +1,28 @@
-name: Parallel 1-5 (CRD MacOS + GoLogin)
+name: Parallel 1-5 (CRD macOS + GoLogin)
 
 on:
   workflow_dispatch:
     inputs:
+      crd_auth_1:
+        description: 'CRD Auth Code 1 (Required)[Paste full command or 4/xxx code]'
+        required: true
+        type: string
+      crd_auth_2:
+        description: 'CRD Auth Code 2 (Optional)'
+        required: false
+        type: string
+      crd_auth_3:
+        description: 'CRD Auth Code 3 (Optional)'
+        required: false
+        type: string
+      crd_auth_4:
+        description: 'CRD Auth Code 4 (Optional)'
+        required: false
+        type: string
+      crd_auth_5:
+        description: 'CRD Auth Code 5 (Optional)'
+        required: false
+        type: string
       gologin_email:
         description: 'GoLogin Account Email (Required)'
         required: true
@@ -11,56 +31,6 @@ on:
         description: 'GoLogin Account Password (Required)'
         required: true
         type: string
-      crd_pin:
-        description: 'Chrome Remote Desktop 6-Digit PIN (Required)'
-        required: true
-        type: string
-        default: '123456'
-      crd_code_1:
-        description: 'CRD Auth Code/Command for Device 1'
-        required: false
-        type: string
-      crd_code_2:
-        description: 'CRD Auth Code/Command for Device 2'
-        required: false
-        type: string
-      crd_code_3:
-        description: 'CRD Auth Code/Command for Device 3'
-        required: false
-        type: string
-      crd_code_4:
-        description: 'CRD Auth Code/Command for Device 4'
-        required: false
-        type: string
-      crd_code_5:
-        description: 'CRD Auth Code/Command for Device 5'
-        required: false
-        type: string
-      device_1:
-        description: 'Spawn Device 1?'
-        required: false
-        type: boolean
-        default: true
-      device_2:
-        description: 'Spawn Device 2?'
-        required: false
-        type: boolean
-        default: false
-      device_3:
-        description: 'Spawn Device 3?'
-        required: false
-        type: boolean
-        default: false
-      device_4:
-        description: 'Spawn Device 4?'
-        required: false
-        type: boolean
-        default: false
-      device_5:
-        description: 'Spawn Device 5?'
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   prepare_matrix:
@@ -73,69 +43,59 @@ jobs:
         id: set-matrix
         shell: python
         env:
-          D1: ${{ inputs.device_1 }}
-          C1: ${{ inputs.crd_code_1 }}
-          D2: ${{ inputs.device_2 }}
-          C2: ${{ inputs.crd_code_2 }}
-          D3: ${{ inputs.device_3 }}
-          C3: ${{ inputs.crd_code_3 }}
-          D4: ${{ inputs.device_4 }}
-          C4: ${{ inputs.crd_code_4 }}
-          D5: ${{ inputs.device_5 }}
-          C5: ${{ inputs.crd_code_5 }}
+          CRD_1: ${{ inputs.crd_auth_1 }}
+          CRD_2: ${{ inputs.crd_auth_2 }}
+          CRD_3: ${{ inputs.crd_auth_3 }}
+          CRD_4: ${{ inputs.crd_auth_4 }}
+          CRD_5: ${{ inputs.crd_auth_5 }}
         run: |
           import os, json, re
-          
-          def extract_code(raw):
-              if not raw: return ""
-              # Automatically extracts the code if you paste the entire SSH setup command
-              m = re.search(r'--code="([^"]+)"', raw)
-              return m.group(1) if m else raw.strip()
-              
           devices = {
-            "1": {"active": os.environ.get("D1") == "true", "code": extract_code(os.environ.get("C1"))},
-            "2": {"active": os.environ.get("D2") == "true", "code": extract_code(os.environ.get("C2"))},
-            "3": {"active": os.environ.get("D3") == "true", "code": extract_code(os.environ.get("C3"))},
-            "4": {"active": os.environ.get("D4") == "true", "code": extract_code(os.environ.get("C4"))},
-            "5": {"active": os.environ.get("D5") == "true", "code": extract_code(os.environ.get("C5"))}
+              "1": os.environ.get("CRD_1", "").strip(),
+              "2": os.environ.get("CRD_2", "").strip(),
+              "3": os.environ.get("CRD_3", "").strip(),
+              "4": os.environ.get("CRD_4", "").strip(),
+              "5": os.environ.get("CRD_5", "").strip(),
           }
-          
           includes =[]
-          for dev, info in devices.items():
-              if info["active"] and info["code"]:
-                  includes.append({"device": dev, "crd_code": info["code"]})
+          for dev, auth in devices.items():
+              if auth:
+                  # Smartly extract just the '4/xxx' code if user pasted the full Google command
+                  code = auth
+                  match_quotes = re.search(r'--code="(4/[^"]+)"', auth)
+                  match_no_quotes = re.search(r'--code=(4/[^\s]+)', auth)
+                  if match_quotes:
+                      code = match_quotes.group(1)
+                  elif match_no_quotes:
+                      code = match_no_quotes.group(1)
+                  
+                  includes.append({"device": dev, "crd_auth": code})
           
-          if not includes:
-              print("Error: No active devices with valid CRD codes provided. Exiting.")
-              exit(1)
-              
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"matrix={json.dumps({'include': includes})}\n")
 
   remote_session:
     name: Remote Session ${{ matrix.device }}
     needs: prepare_matrix
-    runs-on: macos-latest
+    runs-on: macos-14
     timeout-minutes: 60
+    
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare_matrix.outputs.matrix) }}
 
     steps:
-      - name: Set macOS User Password (runner:admin)
+      - name: Setup GUI Authorization Credentials
         run: |
-          echo "Setting password for current user ('runner') to 'admin'..."
-          sudo dscl . -passwd /Users/runner admin
-          sudo dseditgroup -o edit -a runner -t user admin
-          echo "✅ Local GUI password updated. Use Username 'runner' and Password 'admin' if prompted."
+          echo "Creating 'admin' user with password 'admin'..."
+          sudo sysadminctl -addUser admin -password admin -admin
+          
+          echo "Setting default runner password to 'admin' as well..."
+          sudo sysadminctl -adminUser "$USER" -password admin
+          
+          echo "✅ Credentials configured. You can authorize macOS GUI prompts with Username: admin / Password: admin"
 
-      - name: Prevent Sleep & Screen Lock
-        run: |
-          sudo pmset -a disablesleep 1
-          sudo pmset -a displaysleep 0
-          sudo pmset -a disksleep 0
-
-      - name: Download and Install Chrome Remote Desktop
+      - name: Install and Start Chrome Remote Desktop
         run: |
           echo "Downloading Chrome Remote Desktop for macOS..."
           curl -L -o crd.dmg "https://dl.google.com/chrome-remote-desktop/chromeremotedesktop.dmg"
@@ -143,43 +103,23 @@ jobs:
           echo "Mounting DMG..."
           hdiutil attach crd.dmg -mountpoint /Volumes/crd -nobrowse -quiet
           
-          echo "Installing PKG..."
+          echo "Installing CRD Package..."
           sudo installer -pkg "/Volumes/crd/Chrome Remote Desktop Host.pkg" -target /
           hdiutil detach /Volumes/crd -quiet -force
+          
+          echo "Bypassing macOS Screen Recording & Accessibility Prompts for CRD..."
+          for APP_BUNDLE_ID in "com.google.chrome.remote_desktop" "com.google.Chrome"; do
+            sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceScreenCapture', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
+            sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceAccessibility', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
+          done
 
-      - name: Bypass macOS Security (Screen Recording & Accessibility)
-        run: |
-          echo "Bypassing macOS TCC prompts for CRD..."
-          APP_BUNDLE_ID="com.google.ChromeRemoteDesktopHost"
-          EXEC_PATH="/Library/PrivilegedHelperTools/Google/ChromeRemoteDesktop/ChromeRemoteDesktopHost.app/Contents/MacOS/remoting_host"
+          DeviceName="macOS-Runner-Dev${{ matrix.device }}"
           
-          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceScreenCapture', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
-          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceAccessibility', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
+          echo "Registering and Starting Chrome Remote Desktop Host ($DeviceName)..."
+          # Standard CRD Host path on macOS. PIN is hardcoded to 112233
+          sudo /Library/PrivilegedHelperTools/ChromeRemoteDesktopHost.app/Contents/MacOS/remoting_start_host --code="${{ matrix.crd_auth }}" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$DeviceName" --pin="112233"
           
-          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceScreenCapture', '$EXEC_PATH', 1, 2, 4, 1, 0);" || true
-          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceAccessibility', '$EXEC_PATH', 1, 2, 4, 1, 0);" || true
-          
-          echo "✅ Screen Recording & Accessibility permissions granted to CRD!"
-
-      - name: Start Chrome Remote Desktop Host
-        env:
-          CRD_CODE: ${{ matrix.crd_code }}
-          CRD_PIN: ${{ inputs.crd_pin }}
-          DEVICE_NAME: "macOS-Runner-Dev${{ matrix.device }}"
-        run: |
-          echo "Configuring Chrome Remote Desktop..."
-          START_HOST="/Library/PrivilegedHelperTools/Google/ChromeRemoteDesktop/ChromeRemoteDesktopHost.app/Contents/MacOS/remoting_start_host"
-          
-          if[ ! -f "$START_HOST" ]; then
-            START_HOST=$(find /Library/PrivilegedHelperTools -name "remoting_start_host" 2>/dev/null | head -n 1)
-          fi
-          
-          echo "Starting CRD with Device Name: $DEVICE_NAME"
-          # Pass the PIN twice through stdin (CRD asks for PIN then confirmation)
-          printf "%s\n%s\n" "$CRD_PIN" "$CRD_PIN" | "$START_HOST" --code="$CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$DEVICE_NAME"
-          
-          echo "✅ Chrome Remote Desktop Setup Complete!"
-          echo "👉 Go to https://remotedesktop.google.com/access to control this machine."
+          echo "✅ Chrome Remote Desktop is online and ready for connection."
 
       - name: Download, Install, and Open GoLogin
         run: |
@@ -215,24 +155,25 @@ jobs:
               tell application "GoLogin" to activate
               delay 2
               
+              # Press TAB 8 times to reach 'I already have an account Log in'
               repeat 8 times
                   key code 48 # Tab key
                   delay 0.5
               end repeat
               
-              key code 36 # Enter/Return key
+              key code 36 # Enter key
               delay 4
               
               keystroke userEmail
               delay 0.5
               
-              key code 48 # Tab
+              key code 48 # Tab key
               delay 0.5
               
               keystroke userPass
               delay 0.5
               
-              key code 36 # Enter
+              key code 36 # Enter key
           end tell
           EOF
           
@@ -241,9 +182,5 @@ jobs:
       - name: Keep Runner Alive
         if: always()
         run: |
-          echo "============================================="
-          echo "   Session is active and ready for access."
-          echo "   Mac Username: runner"
-          echo "   Mac Password: admin"
-          echo "============================================="
+          echo "Session is active. Connect via https://remotedesktop.google.com/access"
           sleep 3600
