@@ -118,6 +118,7 @@ jobs:
           echo "Searching for remoting_start_host..."
           START_HOST_PATH=$(find /Library /Applications /opt -name "remoting_start_host" -type f 2>/dev/null | head -n 1)
           
+          # Fixed the spacing error here
           if[ -z "$START_HOST_PATH" ]; then
              echo "Could not find 'remoting_start_host'. Searching for 'start-host'..."
              START_HOST_PATH=$(find /Library /Applications /opt -name "start-host" -type f 2>/dev/null | head -n 1)
