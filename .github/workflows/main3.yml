@@ -1,0 +1,144 @@
+name: Parallel 1-5 (Getscreen.me macOS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      getscreen_email:
+        description: 'Getscreen.me Account Email (Required)'
+        required: true
+        type: string
+      device_1:
+        description: 'Spawn Device 1?'
+        required: false
+        type: boolean
+        default: true
+      device_2:
+        description: 'Spawn Device 2?'
+        required: false
+        type: boolean
+        default: false
+      device_3:
+        description: 'Spawn Device 3?'
+        required: false
+        type: boolean
+        default: false
+      device_4:
+        description: 'Spawn Device 4?'
+        required: false
+        type: boolean
+        default: false
+      device_5:
+        description: 'Spawn Device 5?'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # 1. This quick job checks your inputs and decides how many runners to make
+  prepare_matrix:
+    name: Check Inputs & Prepare Runners
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Generate Dynamic Matrix
+        id: set-matrix
+        shell: python
+        env:
+          EMAIL: ${{ inputs.getscreen_email }}
+          D1: ${{ inputs.device_1 }}
+          D2: ${{ inputs.device_2 }}
+          D3: ${{ inputs.device_3 }}
+          D4: ${{ inputs.device_4 }}
+          D5: ${{ inputs.device_5 }}
+        run: |
+          import os, json
+          
+          email = os.environ.get("EMAIL", "").strip()
+          
+          # Map the boolean inputs
+          devices = {
+              "1": os.environ.get("D1") == "true",
+              "2": os.environ.get("D2") == "true",
+              "3": os.environ.get("D3") == "true",
+              "4": os.environ.get("D4") == "true",
+              "5": os.environ.get("D5") == "true"
+          }
+          
+          # Only include devices that are checked and ensure email exists
+          includes =[]
+          for dev, is_active in devices.items():
+              if is_active and email:
+                  includes.append({"device": dev, "email": email})
+          
+          matrix_output = {"include": includes}
+          
+          # Send the configuration to the next job
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps(matrix_output)}\n")
+
+  # 2. This is the actual Remote Session job
+  remote_session:
+    name: Remote Session ${{ matrix.device }}
+    needs: prepare_matrix # Waits for the prepare_matrix job to finish
+    runs-on: macos-latest
+    timeout-minutes: 60 # Set to 60 mins. Change this if you want it to last longer (max is 360)
+    
+    strategy:
+      fail-fast: false
+      # Reads the exact number of runners needed from the first job
+      matrix: ${{ fromJson(needs.prepare_matrix.outputs.matrix) }}
+
+    steps:
+      - name: Install, Bypass Security, and Start Getscreen.me
+        run: |
+          echo "Downloading Getscreen.me Agent for macOS..."
+          curl -L -o getscreen.dmg "https://getscreen.me/download/getscreen.dmg"
+          
+          DeviceName="macOS-Runner-Dev${{ matrix.device }}"
+          echo "Installing and linking Getscreen.me for Device ${{ matrix.device }} ($DeviceName)..."
+          
+          echo "Mounting DMG..."
+          hdiutil attach getscreen.dmg -mountpoint /Volumes/getscreen -nobrowse -quiet
+          
+          # Find the .app file inside the DMG
+          APP_PATH=$(find /Volumes/getscreen -maxdepth 1 -name "*.app" | head -n 1)
+          APP_NAME=$(basename "$APP_PATH")
+          
+          echo "Copying $APP_NAME to /Applications..."
+          sudo cp -R "$APP_PATH" /Applications/
+          hdiutil detach /Volumes/getscreen -quiet -force
+          
+          # ---------------------------------------------------------
+          # TCC BYPASS: Grant Screen Recording & Accessibility Automatically
+          # ---------------------------------------------------------
+          echo "Bypassing macOS Screen Recording & Accessibility Prompts..."
+          APP_BUNDLE_ID=$(defaults read "/Applications/$APP_NAME/Contents/Info.plist" CFBundleIdentifier)
+          
+          # Using specific columns so the SQL injection succeeds on macOS 12, 13, 14, and 15
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceScreenCapture', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceAccessibility', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
+          # ---------------------------------------------------------
+
+          # Locate the executable inside the App bundle
+          EXEC_NAME=$(defaults read "/Applications/$APP_NAME/Contents/Info.plist" CFBundleExecutable)
+          EXEC_PATH="/Applications/$APP_NAME/Contents/MacOS/$EXEC_NAME"
+          
+          echo "Registering and Starting Getscreen.me..."
+          # Install daemon and register to the provided email silently
+          sudo "$EXEC_PATH" -install || true
+          sudo "$EXEC_PATH" -register "${{ matrix.email }}"
+          sudo "$EXEC_PATH" -config "name='$DeviceName' autostart=true nonadmin=true control=true disable_confirmation=true"
+          sudo "$EXEC_PATH" -start || true
+          
+          echo "=============================================="
+          echo "✅ Getscreen.me is running with GUI Permissions granted!"
+          echo "   Device Name: $DeviceName"
+          echo "   Check your Getscreen Dashboard (https://getscreen.me/en/dashboard)"
+          echo "=============================================="
+          
+      - name: Keep Runner Alive
+        if: always()
+        run: |
+          echo "Session is active. This runner will remain online until the job timeout is reached."
+          sleep 3600 # Wait for 1 hour. Adjust this if you change the timeout-minutes above!
