@@ -144,4 +144,4 @@ jobs:
         if: always()
         run: |
           echo "Session is active. This runner will remain online until the job timeout is reached."
-          sleep 3600hhhhhhhhhhhhhhhhhhhhh
+          sleep 3600
