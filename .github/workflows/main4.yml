@@ -117,18 +117,11 @@ jobs:
           done
           # ---------------------------------------------------------
           
-          # Locate the start-host binary. It moves between versions, so we find it dynamically.
-          echo "Locating remoting_start_host binary..."
-          START_HOST_PATH=$(find /Library /Applications /opt/google -name "remoting_start_host" -type f 2>/dev/null | head -n 1)
-          
-          # Fixed the missing space error here
-          if [ -z "$START_HOST_PATH" ]; then
-            echo "Fallback: Checking for 'start-host'..."
-            START_HOST_PATH=$(find /Library /Applications /opt/google -name "start-host" -type f 2>/dev/null | head -n 1)
-          fi
-          
           DeviceName="macOS-Runner-Dev${{ matrix.device }}"
           echo "Configuring Chrome Remote Desktop for $DeviceName..."
+          
+          # Hardcoding the exact known executable path for macOS Chrome Remote Desktop
+          START_HOST_PATH="/Library/PrivilegedHelperTools/ChromeRemoteDesktopHost.app/Contents/MacOS/remoting_start_host"
           
           # Execute the CRD connection script
           "$START_HOST_PATH" --code="${{ matrix.crd_code }}" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$DeviceName" --pin="112233"
