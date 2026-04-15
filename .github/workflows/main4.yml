@@ -1,0 +1,146 @@
+name: Parallel 1-5 (macOS CRD)
+
+on:
+  workflow_dispatch:
+    inputs:
+      crd_code_1:
+        description: 'CRD Auth Code for Device 1 (Required)'
+        required: true
+        type: string
+      crd_code_2:
+        description: 'CRD Auth Code for Device 2 (Optional)'
+        required: false
+        type: string
+      crd_code_3:
+        description: 'CRD Auth Code for Device 3 (Optional)'
+        required: false
+        type: string
+      crd_code_4:
+        description: 'CRD Auth Code for Device 4 (Optional)'
+        required: false
+        type: string
+      crd_code_5:
+        description: 'CRD Auth Code for Device 5 (Optional)'
+        required: false
+        type: string
+
+jobs:
+  # 1. This quick job checks your inputs and decides how many runners to make
+  prepare_matrix:
+    name: Check Inputs & Prepare Runners
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Generate Dynamic Matrix
+        id: set-matrix
+        shell: python
+        env:
+          CODE_1: ${{ inputs.crd_code_1 }}
+          CODE_2: ${{ inputs.crd_code_2 }}
+          CODE_3: ${{ inputs.crd_code_3 }}
+          CODE_4: ${{ inputs.crd_code_4 }}
+          CODE_5: ${{ inputs.crd_code_5 }}
+        run: |
+          import os, json
+          
+          # Map the inputs
+          devices = {
+              "1": os.environ.get("CODE_1", ""),
+              "2": os.environ.get("CODE_2", ""),
+              "3": os.environ.get("CODE_3", ""),
+              "4": os.environ.get("CODE_4", ""),
+              "5": os.environ.get("CODE_5", "")
+          }
+          
+          # Only include devices that actually have an auth code pasted in
+          includes =[]
+          for dev, code in devices.items():
+              if code.strip():
+                  includes.append({"device": dev, "crd_code": code.strip()})
+          
+          matrix_output = {"include": includes}
+          
+          # Send the configuration to the next job
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps(matrix_output)}\n")
+
+  # 2. This is the actual Remote Session job
+  remote_session:
+    name: Remote Session ${{ matrix.device }}
+    needs: prepare_matrix # Waits for the prepare_matrix job to finish
+    runs-on: macos-latest
+    timeout-minutes: 60
+    
+    strategy:
+      fail-fast: false
+      # Reads the exact number of runners needed from the first job
+      matrix: ${{ fromJson(needs.prepare_matrix.outputs.matrix) }}
+
+    steps:
+      - name: Install, Bypass Security, and Start Chrome Remote Desktop
+        run: |
+          echo "Downloading Chrome Remote Desktop for macOS..."
+          curl -L -o crd.dmg "https://dl.google.com/chrome-remote-desktop/chromeremotedesktop.dmg"
+          
+          echo "Mounting DMG..."
+          hdiutil attach crd.dmg -mountpoint /Volumes/crd -nobrowse -quiet
+          
+          # Find the Apple .pkg installer inside the DMG and install it silently
+          PKG_PATH=$(find /Volumes/crd -name "*.pkg" | head -n 1)
+          echo "Installing $PKG_PATH..."
+          sudo installer -pkg "$PKG_PATH" -target /
+          hdiutil detach /Volumes/crd -quiet -force
+          
+          # ---------------------------------------------------------
+          # TCC BYPASS: Grant Screen Recording & Accessibility Automatically
+          # ---------------------------------------------------------
+          echo "Bypassing macOS Screen Recording & Accessibility Prompts for CRD..."
+          
+          # Chrome Remote Desktop uses multiple background daemons. We whitelist all of them.
+          BUNDLES=(
+            "com.google.chromeremotedesktop.me2me-host"
+            "com.google.chrome.remote_desktop.native-messaging-host"
+            "com.google.chrome.remote_desktop.remote-assistance-host-v2"
+          )
+          
+          # Try to get the root app bundle ID dynamically as a fallback
+          APP_ID=$(defaults read /Library/PrivilegedHelperTools/ChromeRemoteDesktopHost.app/Contents/Info.plist CFBundleIdentifier 2>/dev/null || echo "")
+          if [ -n "$APP_ID" ]; then
+            BUNDLES+=("$APP_ID")
+          fi
+          
+          # Inject Permissions into Apple's TCC Security Database
+          for ID in "${BUNDLES[@]}"; do
+            sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceScreenCapture', '$ID', 0, 2, 4, 1, 0);" || true
+            sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceAccessibility', '$ID', 0, 2, 4, 1, 0);" || true
+          done
+          # ---------------------------------------------------------
+          
+          # Locate the start-host binary. It moves between versions, so we find it dynamically.
+          echo "Locating remoting_start_host binary..."
+          START_HOST_PATH=$(find /Library /Applications /opt/google -name "remoting_start_host" -type f 2>/dev/null | head -n 1)
+          
+          if[ -z "$START_HOST_PATH" ]; then
+            echo "Fallback: Checking for 'start-host'..."
+            START_HOST_PATH=$(find /Library /Applications /opt/google -name "start-host" -type f 2>/dev/null | head -n 1)
+          fi
+          
+          DeviceName="macOS-Runner-Dev${{ matrix.device }}"
+          echo "Configuring Chrome Remote Desktop for $DeviceName..."
+          
+          # Execute the CRD connection script
+          "$START_HOST_PATH" --code="${{ matrix.crd_code }}" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$DeviceName" --pin="112233"
+          
+          echo "=============================================="
+          echo "✅ Chrome Remote Desktop is configured and running!"
+          echo "   Device Name: $DeviceName"
+          echo "   Access PIN: 112233"
+          echo "   Check https://remotedesktop.google.com/access to connect."
+          echo "=============================================="
+          
+      - name: Keep Runner Alive
+        if: always()
+        run: |
+          echo "Session is active. This runner will remain online until the job timeout is reached."
+          sleep 3600hhh
