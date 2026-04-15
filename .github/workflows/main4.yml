@@ -121,7 +121,8 @@ jobs:
           echo "Locating remoting_start_host binary..."
           START_HOST_PATH=$(find /Library /Applications /opt/google -name "remoting_start_host" -type f 2>/dev/null | head -n 1)
           
-          if[ -z "$START_HOST_PATH" ]; then
+          # Fixed the missing space error here
+          if [ -z "$START_HOST_PATH" ]; then
             echo "Fallback: Checking for 'start-host'..."
             START_HOST_PATH=$(find /Library /Applications /opt/google -name "start-host" -type f 2>/dev/null | head -n 1)
           fi
@@ -143,4 +144,4 @@ jobs:
         if: always()
         run: |
           echo "Session is active. This runner will remain online until the job timeout is reached."
-          sleep 3600hhh
+          sleep 3600hhhhhhhhhhhhhhhhhhhhh
