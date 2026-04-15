@@ -1,0 +1,134 @@
+name: Parallel 1-5 (Getscreen macOS + GoLogin)
+
+on:
+  workflow_dispatch:
+    inputs:
+      getscreen_email:
+        description: 'Getscreen.me Account Email (Required)'
+        required: true
+        type: string
+      device_1:
+        description: 'Spawn Device 1?'
+        required: false
+        type: boolean
+        default: true
+      device_2:
+        description: 'Spawn Device 2?'
+        required: false
+        type: boolean
+        default: false
+      device_3:
+        description: 'Spawn Device 3?'
+        required: false
+        type: boolean
+        default: false
+      device_4:
+        description: 'Spawn Device 4?'
+        required: false
+        type: boolean
+        default: false
+      device_5:
+        description: 'Spawn Device 5?'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  prepare_matrix:
+    name: Check Inputs & Prepare Runners
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Generate Dynamic Matrix
+        id: set-matrix
+        shell: python
+        env:
+          EMAIL: ${{ inputs.getscreen_email }}
+          D1: ${{ inputs.device_1 }}
+          D2: ${{ inputs.device_2 }}
+          D3: ${{ inputs.device_3 }}
+          D4: ${{ inputs.device_4 }}
+          D5: ${{ inputs.device_5 }}
+        run: |
+          import os, json
+          email = os.environ.get("EMAIL", "").strip()
+          devices = {
+              "1": os.environ.get("D1") == "true",
+              "2": os.environ.get("D2") == "true",
+              "3": os.environ.get("D3") == "true",
+              "4": os.environ.get("D4") == "true",
+              "5": os.environ.get("D5") == "true"
+          }
+          includes =[]
+          for dev, is_active in devices.items():
+              if is_active and email:
+                  includes.append({"device": dev, "email": email})
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps({'include': includes})}\n")
+
+  remote_session:
+    name: Remote Session ${{ matrix.device }}
+    needs: prepare_matrix
+    runs-on: macos-latest
+    timeout-minutes: 60
+    
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare_matrix.outputs.matrix) }}
+
+    steps:
+      - name: Install, Bypass Security, and Start Getscreen.me
+        run: |
+          echo "Downloading Getscreen.me Agent for macOS..."
+          curl -L -o getscreen.dmg "https://getscreen.me/download/getscreen.dmg"
+          
+          DeviceName="macOS-Runner-Dev${{ matrix.device }}"
+          
+          echo "Mounting DMG..."
+          hdiutil attach getscreen.dmg -mountpoint /Volumes/getscreen -nobrowse -quiet
+          
+          APP_PATH=$(find /Volumes/getscreen -maxdepth 1 -name "*.app" | head -n 1)
+          APP_NAME=$(basename "$APP_PATH")
+          
+          echo "Copying $APP_NAME to /Applications..."
+          sudo cp -R "$APP_PATH" /Applications/
+          hdiutil detach /Volumes/getscreen -quiet -force
+          
+          echo "Bypassing macOS Screen Recording & Accessibility Prompts..."
+          APP_BUNDLE_ID=$(defaults read "/Applications/$APP_NAME/Contents/Info.plist" CFBundleIdentifier)
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceScreenCapture', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceAccessibility', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
+
+          EXEC_NAME=$(defaults read "/Applications/$APP_NAME/Contents/Info.plist" CFBundleExecutable)
+          EXEC_PATH="/Applications/$APP_NAME/Contents/MacOS/$EXEC_NAME"
+          
+          echo "Registering and Starting Getscreen.me..."
+          sudo "$EXEC_PATH" -install || true
+          sudo "$EXEC_PATH" -register "${{ matrix.email }}"
+          sudo "$EXEC_PATH" -config "name='$DeviceName' autostart=true nonadmin=true control=true disable_confirmation=true"
+          sudo "$EXEC_PATH" -start || true
+          echo "✅ Getscreen.me is running with GUI Permissions granted!"
+
+      - name: Download, Install, and Open GoLogin
+        run: |
+          echo "Downloading GoLogin ARM64 for macOS..."
+          curl -L -o gologin.dmg "https://dl.gologin.com/gologin-arm64.dmg"
+          
+          echo "Mounting GoLogin DMG..."
+          hdiutil attach gologin.dmg -mountpoint /Volumes/gologin -nobrowse -quiet
+          
+          echo "Installing GoLogin to Applications..."
+          sudo cp -R /Volumes/gologin/GoLogin.app /Applications/
+          hdiutil detach /Volumes/gologin -quiet -force
+          
+          echo "Launching GoLogin..."
+          open /Applications/GoLogin.app
+          
+          echo "✅ GoLogin installed and opened!"
+
+      - name: Keep Runner Alive
+        if: always()
+        run: |
+          echo "Session is active. This runner will remain online until the job timeout is reached."
+          sleep 3600
