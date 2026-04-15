@@ -1,26 +1,26 @@
-name: Parallel 1-5 (CRD macOS + GoLogin)
+name: Parallel 1-5 (DWService macOS + GoLogin)
 
 on:
   workflow_dispatch:
     inputs:
-      crd_auth_1:
-        description: 'CRD Auth Code 1 (Required)[Paste full command or 4/xxx code]'
+      dw_auth_1:
+        description: 'DWService Auth Code 1 (Required)[e.g., 123-456-789]'
         required: true
         type: string
-      crd_auth_2:
-        description: 'CRD Auth Code 2 (Optional)'
+      dw_auth_2:
+        description: 'DWService Auth Code 2 (Optional)'
         required: false
         type: string
-      crd_auth_3:
-        description: 'CRD Auth Code 3 (Optional)'
+      dw_auth_3:
+        description: 'DWService Auth Code 3 (Optional)'
         required: false
         type: string
-      crd_auth_4:
-        description: 'CRD Auth Code 4 (Optional)'
+      dw_auth_4:
+        description: 'DWService Auth Code 4 (Optional)'
         required: false
         type: string
-      crd_auth_5:
-        description: 'CRD Auth Code 5 (Optional)'
+      dw_auth_5:
+        description: 'DWService Auth Code 5 (Optional)'
         required: false
         type: string
       gologin_email:
@@ -43,33 +43,30 @@ jobs:
         id: set-matrix
         shell: python
         env:
-          CRD_1: ${{ inputs.crd_auth_1 }}
-          CRD_2: ${{ inputs.crd_auth_2 }}
-          CRD_3: ${{ inputs.crd_auth_3 }}
-          CRD_4: ${{ inputs.crd_auth_4 }}
-          CRD_5: ${{ inputs.crd_auth_5 }}
+          DW_1: ${{ inputs.dw_auth_1 }}
+          DW_2: ${{ inputs.dw_auth_2 }}
+          DW_3: ${{ inputs.dw_auth_3 }}
+          DW_4: ${{ inputs.dw_auth_4 }}
+          DW_5: ${{ inputs.dw_auth_5 }}
         run: |
           import os, json, re
           devices = {
-              "1": os.environ.get("CRD_1", "").strip(),
-              "2": os.environ.get("CRD_2", "").strip(),
-              "3": os.environ.get("CRD_3", "").strip(),
-              "4": os.environ.get("CRD_4", "").strip(),
-              "5": os.environ.get("CRD_5", "").strip(),
+              "1": os.environ.get("DW_1", "").strip(),
+              "2": os.environ.get("DW_2", "").strip(),
+              "3": os.environ.get("DW_3", "").strip(),
+              "4": os.environ.get("DW_4", "").strip(),
+              "5": os.environ.get("DW_5", "").strip(),
           }
           includes =[]
           for dev, auth in devices.items():
               if auth:
-                  # Smartly extract just the '4/xxx' code if user pasted the full Google command
+                  # Smartly extract just the '123-456-789' code if user pasted extra text
                   code = auth
-                  match_quotes = re.search(r'--code="(4/[^"]+)"', auth)
-                  match_no_quotes = re.search(r'--code=(4/[^\s]+)', auth)
-                  if match_quotes:
-                      code = match_quotes.group(1)
-                  elif match_no_quotes:
-                      code = match_no_quotes.group(1)
+                  match = re.search(r'(\d{3}-\d{3}-\d{3})', auth)
+                  if match:
+                      code = match.group(1)
                   
-                  includes.append({"device": dev, "crd_auth": code})
+                  includes.append({"device": dev, "dw_auth": code})
           
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"matrix={json.dumps({'include': includes})}\n")
@@ -95,31 +92,35 @@ jobs:
           
           echo "✅ Credentials configured. You can authorize macOS GUI prompts with Username: admin / Password: admin"
 
-      - name: Install and Start Chrome Remote Desktop
+      - name: Install and Start DWService
         run: |
-          echo "Downloading Chrome Remote Desktop for macOS..."
-          curl -L -o crd.dmg "https://dl.google.com/chrome-remote-desktop/chromeremotedesktop.dmg"
+          echo "Downloading DWService Agent for macOS..."
+          curl -L -o dwagent.sh "https://www.dwservice.net/download/dwagent.sh"
           
-          echo "Mounting DMG..."
-          hdiutil attach crd.dmg -mountpoint /Volumes/crd -nobrowse -quiet
+          echo "Installing DWService Silently..."
+          sudo bash dwagent.sh -silent key="${{ matrix.dw_auth }}"
           
-          echo "Installing CRD Package..."
-          sudo installer -pkg "/Volumes/crd/Chrome Remote Desktop Host.pkg" -target /
-          hdiutil detach /Volumes/crd -quiet -force
+          echo "Bypassing macOS Screen Recording & Accessibility Prompts for DWService..."
+          APP_PATH="/Library/DWAgent/native/DWAgentSvc.app"
           
-          echo "Bypassing macOS Screen Recording & Accessibility Prompts for CRD..."
-          for APP_BUNDLE_ID in "com.google.chrome.remote_desktop" "com.google.Chrome"; do
-            sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceScreenCapture', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
-            sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceAccessibility', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
-          done
-
-          DeviceName="macOS-Runner-Dev${{ matrix.device }}"
+          # Give DWService a few seconds to initialize directories
+          sleep 5
           
-          echo "Registering and Starting Chrome Remote Desktop Host ($DeviceName)..."
-          # Standard CRD Host path on macOS. PIN is hardcoded to 112233
-          sudo /Library/PrivilegedHelperTools/ChromeRemoteDesktopHost.app/Contents/MacOS/remoting_start_host --code="${{ matrix.crd_auth }}" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$DeviceName" --pin="112233"
+          if[ -d "$APP_PATH" ]; then
+              APP_BUNDLE_ID=$(defaults read "$APP_PATH/Contents/Info.plist" CFBundleIdentifier)
+              echo "DWService Bundle ID located: $APP_BUNDLE_ID"
+              
+              sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceScreenCapture', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
+              sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceAccessibility', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
+              
+              echo "Restarting DWService daemon to apply permissions..."
+              sudo killall DWAgentSvc || true
+              sleep 3
+          else
+              echo "⚠️ DWService app not found at expected path. TCC bypass might fail."
+          fi
           
-          echo "✅ Chrome Remote Desktop is online and ready for connection."
+          echo "✅ DWService is installed and online! Device Name: macOS-Runner-Dev${{ matrix.device }}"
 
       - name: Download, Install, and Open GoLogin
         run: |
@@ -182,5 +183,5 @@ jobs:
       - name: Keep Runner Alive
         if: always()
         run: |
-          echo "Session is active. Connect via https://remotedesktop.google.com/access"
+          echo "Session is active. Connect via https://www.dwservice.net/"
           sleep 3600
