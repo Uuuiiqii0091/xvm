@@ -104,12 +104,6 @@ jobs:
             "com.google.chrome.remote_desktop.remote-assistance-host-v2"
           )
           
-          # Try to get the root app bundle ID dynamically as a fallback
-          APP_ID=$(defaults read /Library/PrivilegedHelperTools/ChromeRemoteDesktopHost.app/Contents/Info.plist CFBundleIdentifier 2>/dev/null || echo "")
-          if [ -n "$APP_ID" ]; then
-            BUNDLES+=("$APP_ID")
-          fi
-          
           # Inject Permissions into Apple's TCC Security Database
           for ID in "${BUNDLES[@]}"; do
             sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceScreenCapture', '$ID', 0, 2, 4, 1, 0);" || true
@@ -120,8 +114,21 @@ jobs:
           DeviceName="macOS-Runner-Dev${{ matrix.device }}"
           echo "Configuring Chrome Remote Desktop for $DeviceName..."
           
-          # Hardcoding the exact known executable path for macOS Chrome Remote Desktop
-          START_HOST_PATH="/Library/PrivilegedHelperTools/ChromeRemoteDesktopHost.app/Contents/MacOS/remoting_start_host"
+          # Global search for the remoting_start_host executable (it ignores Permission Denied errors to keep logs clean)
+          echo "Searching for remoting_start_host..."
+          START_HOST_PATH=$(find /Library /Applications /opt -name "remoting_start_host" -type f 2>/dev/null | head -n 1)
+          
+          if[ -z "$START_HOST_PATH" ]; then
+             echo "Could not find 'remoting_start_host'. Searching for 'start-host'..."
+             START_HOST_PATH=$(find /Library /Applications /opt -name "start-host" -type f 2>/dev/null | head -n 1)
+          fi
+
+          if[ -z "$START_HOST_PATH" ]; then
+             echo "Error: Could not locate Chrome Remote Desktop executable anywhere on the system!"
+             exit 1
+          fi
+
+          echo "Found executable at: $START_HOST_PATH"
           
           # Execute the CRD connection script
           "$START_HOST_PATH" --code="${{ matrix.crd_code }}" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$DeviceName" --pin="112233"
