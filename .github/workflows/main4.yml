@@ -3,13 +3,8 @@ name: Parallel 1-5 (CRD Windows + GoLogin)
 on:
   workflow_dispatch:
     inputs:
-      crd_pin:
-        description: 'Chrome Remote Desktop PIN (6 digits)'
-        required: true
-        type: string
-        default: '123456'
       crd_auth_1:
-        description: 'CRD Auth Code 1 (Required) [Paste full command or 4/xxx code]'
+        description: 'CRD Auth Code 1 (Required)[Paste full command or 4/xxx code]'
         required: true
         type: string
       crd_auth_2:
@@ -102,11 +97,13 @@ jobs:
           Write-Host "Configuring Registry for Headless Session..."
           New-ItemProperty -Path "HKLM:\Software\Policies\Google\Chrome" -Name "RemoteAccessHostRequireCurtain" -PropertyType String -Value "0" -Force | Out-Null
           
-          $DeviceName = "$env:COMPUTERNAME-Dev${{ matrix.device }}"
+          # Sets device name to strictly 1, 2, 3, 4, or 5
+          $DeviceName = "${{ matrix.device }}"
           $StartHostPath = (Get-ChildItem -Path "C:\Program Files*\Google\Chrome Remote Desktop\*\remoting_start_host.exe" | Select-Object -First 1).FullName
           
           Write-Host "Registering Chrome Remote Desktop Host ($DeviceName)..."
-          & $StartHostPath --code="${{ matrix.crd_auth }}" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$DeviceName" --pin="${{ inputs.crd_pin }}"
+          # Hardcoded PIN to 112233
+          & $StartHostPath --code="${{ matrix.crd_auth }}" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$DeviceName" --pin="112233"
           
           Write-Host "✅ Chrome Remote Desktop is online and ready for connection."
           
@@ -165,36 +162,32 @@ jobs:
               
               pyautogui.write(os.environ['GOLOGIN_PASSWORD'])
               
-              print('Clicking Login...')
+              print('Submitting first Login attempt...')
               pyautogui.press('enter')
               
-              # Wait to see if Cloudflare Captcha appears
-              print('Waiting 5 seconds to check for Cloudflare Captcha...')
-              time.sleep(5)
-              
-              # Attempt to interact with Captcha if it is blocking
+              # Calculate Window Center for relative clicks
               cx = win.left + (win.width // 2)
               cy = win.top + (win.height // 2)
               
-              print('Triggering potential Captcha verification...')
-              # Click center-bottom where the checkbox usually appears
-              pyautogui.click(cx, cy + 100)
-              time.sleep(0.5)
-              pyautogui.click(cx, cy + 150)
+              print('Waiting 5 seconds for Cloudflare Captcha...')
+              time.sleep(5)
               
-              # Use Tab & Space as a fallback to activate the checkbox
+              print('Clicking the Captcha box...')
+              # Click the Cloudflare checkbox: It appears below Login button, shifted to the left
+              pyautogui.click(cx - 120, cy + 170)
+              
+              # Fallback keyboard interaction just in case
               pyautogui.press('tab')
               pyautogui.press('space')
               
-              print('Waiting 10 seconds for Captcha approval...')
+              print('Waiting 10 seconds for Success message...')
               time.sleep(10)
               
-              print('Clicking Login again...')
-              # Hit Enter again (to submit the login form after Captcha is bypassed)
+              print('Clicking Login button again...')
+              # Click the Login button area
+              pyautogui.click(cx, cy + 80)
+              # Send enter keystroke to submit
               pyautogui.press('enter')
-              
-              # Also click slightly below the center where the Login button might be
-              pyautogui.click(cx, cy + 50)
               
               print('✅ Login sequence completed.')
           else:
