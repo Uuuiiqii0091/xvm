@@ -121,7 +121,7 @@ jobs:
           
           Write-Host "✅ GoLogin installed and opened!"
 
-      - name: Automate GoLogin Login & Handle Captcha
+      - name: Automate GoLogin Login & Handle Captcha (Keyboard Only)
         shell: pwsh
         env:
           GOLOGIN_EMAIL: ${{ inputs.gologin_email }}
@@ -165,25 +165,24 @@ jobs:
               print('Submitting first Login attempt...')
               pyautogui.press('enter')
               
-              print('Waiting 5 seconds for Cloudflare Captcha...')
-              time.sleep(5)
+              print('Waiting 8 seconds for Cloudflare Captcha...')
+              time.sleep(8)
               
-              print('Navigating to Captcha box (5 TABs)...')
-              pyautogui.press('tab', presses=5, interval=0.5)
+              print('Pressing Tab once to focus the Captcha box...')
+              pyautogui.press('tab')
+              time.sleep(1)
               
-              print('Pressing SPACE to verify human...')
+              print('Pressing Space to check the Captcha box...')
               pyautogui.press('space')
               
-              print('Waiting 10 seconds for Success checkmark...')
+              print('Waiting 10 seconds for Success message...')
               time.sleep(10)
               
-              print('Navigating to Login button (4 TABs)...')
-              pyautogui.press('tab', presses=4, interval=0.5)
+              print('Navigating back to the Login button (9 Tabs)...')
+              pyautogui.press('tab', presses=9, interval=0.5)
               
-              print('Pressing SPACE to submit Login again...')
+              print('Pressing Space to click Login button again...')
               pyautogui.press('space')
-              # Sending an extra enter just to be safe
-              pyautogui.press('enter')
               
               print('✅ Login sequence completed.')
           else:
