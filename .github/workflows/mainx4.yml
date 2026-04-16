@@ -94,8 +94,11 @@ jobs:
           
           echo "Bypassing macOS Screen Recording & Accessibility Prompts..."
           APP_BUNDLE_ID=$(defaults read "/Applications/$APP_NAME/Contents/Info.plist" CFBundleIdentifier)
+          
+          # Inject Getscreen into macOS TCC SQLite Database (Grants Screen Recording & Accessibility)
           sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceScreenCapture', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
           sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceAccessibility', '$APP_BUNDLE_ID', 0, 2, 4, 1, 0);" || true
+          
           EXEC_NAME=$(defaults read "/Applications/$APP_NAME/Contents/Info.plist" CFBundleExecutable)
           EXEC_PATH="/Applications/$APP_NAME/Contents/MacOS/$EXEC_NAME"
           
@@ -109,6 +112,7 @@ jobs:
       - name: Download, Install, and Open GoLogin
         run: |
           echo "Downloading GoLogin ARM64 for macOS..."
+          # Uses ARM64 binary optimized for newer Apple Silicon Action Runners
           curl -L -o gologin.dmg "https://dl.gologin.com/gologin-arm64.dmg"
           
           echo "Mounting GoLogin DMG..."
@@ -128,48 +132,57 @@ jobs:
           GOLOGIN_EMAIL: ${{ inputs.gologin_email }}
           GOLOGIN_PASSWORD: "11223344"
         run: |
-          echo "Waiting 15 seconds for GoLogin to load..."
-          sleep 15
+          echo "Injecting Accessibility permissions for osascript and System Events..."
+          # CRITICAL FIX FOR NEW macOS: Forces permission so AppleScript isn't blocked by the OS
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceAccessibility', '/usr/bin/osascript', 1, 2, 4, 1, 0);" || true
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('kTCCServiceAccessibility', 'com.apple.systemevents', 0, 2, 4, 1, 0);" || true
           
-          echo "Automating keystrokes using AppleScript..."
+          echo "Waiting 20 seconds for GoLogin to completely render..."
+          sleep 20
+          
+          echo "Automating keystrokes using AppleScript (Clipboard Method)..."
           osascript <<'EOF'
-          # Fetch environment variables safely
           set userEmail to system attribute "GOLOGIN_EMAIL"
           set userPass to system attribute "GOLOGIN_PASSWORD"
           
           tell application "System Events"
-              # Bring GoLogin to the front
               tell application "GoLogin" to activate
-              delay 2
+              delay 3
               
-              # Press TAB 8 times to reach 'I already have an account Log in'
+              -- Depending on GoLogin's exact version, it defaults to "Sign Up". 
+              -- Pressing Tab 8 times brings it to "I already have an account - Log In"
               repeat 8 times
-                  key code 48 # Tab key
+                  key code 48 -- Tab key
                   delay 0.5
               end repeat
               
-              # Press ENTER
-              key code 36 # Enter/Return key
+              -- Press ENTER to switch to the Log In tab
+              key code 36 
               delay 4
               
-              # Type Email
-              keystroke userEmail
+              -- Paste Email safely via clipboard (Fixes dropped characters in Electron)
+              set the clipboard to userEmail
               delay 0.5
+              keystroke "v" using command down
+              delay 1
               
-              # Press TAB
+              -- Press TAB to move to Password field
               key code 48
-              delay 0.5
+              delay 1
               
-              # Type Password
-              keystroke userPass
+              -- Paste Password safely via clipboard
+              set the clipboard to userPass
               delay 0.5
+              keystroke "v" using command down
+              delay 1
               
-              # Press ENTER to Login
+              -- Press ENTER to trigger Login
               key code 36
+              delay 5
           end tell
           EOF
           
-          echo "✅ Login automated successfully."
+          echo "✅ Login automation completed."
           
       - name: Keep Runner Alive
         if: always()
