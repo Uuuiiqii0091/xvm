@@ -7,15 +7,6 @@ on:
         description: 'GoLogin Account Email (Required)'
         required: true
         type: string
-      gologin_password:
-        description: 'GoLogin Account Password (Required)'
-        required: true
-        type: string
-      crd_pin:
-        description: 'Chrome Remote Desktop 6-Digit PIN (Required)'
-        required: true
-        type: string
-        default: '123456'
       crd_code_1:
         description: 'CRD Auth Code/Command for Device 1'
         required: false
@@ -36,31 +27,6 @@ on:
         description: 'CRD Auth Code/Command for Device 5'
         required: false
         type: string
-      device_1:
-        description: 'Spawn Device 1?'
-        required: false
-        type: boolean
-        default: true
-      device_2:
-        description: 'Spawn Device 2?'
-        required: false
-        type: boolean
-        default: false
-      device_3:
-        description: 'Spawn Device 3?'
-        required: false
-        type: boolean
-        default: false
-      device_4:
-        description: 'Spawn Device 4?'
-        required: false
-        type: boolean
-        default: false
-      device_5:
-        description: 'Spawn Device 5?'
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   prepare_matrix:
@@ -73,15 +39,10 @@ jobs:
         id: set-matrix
         shell: python
         env:
-          D1: ${{ inputs.device_1 }}
           C1: ${{ inputs.crd_code_1 }}
-          D2: ${{ inputs.device_2 }}
           C2: ${{ inputs.crd_code_2 }}
-          D3: ${{ inputs.device_3 }}
           C3: ${{ inputs.crd_code_3 }}
-          D4: ${{ inputs.device_4 }}
           C4: ${{ inputs.crd_code_4 }}
-          D5: ${{ inputs.device_5 }}
           C5: ${{ inputs.crd_code_5 }}
         run: |
           import os, json, re
@@ -92,21 +53,22 @@ jobs:
               m = re.search(r'--code="([^"]+)"', raw)
               return m.group(1) if m else raw.strip()
               
+          # Check which CRD codes were provided
           devices = {
-            "1": {"active": os.environ.get("D1") == "true", "code": extract_code(os.environ.get("C1"))},
-            "2": {"active": os.environ.get("D2") == "true", "code": extract_code(os.environ.get("C2"))},
-            "3": {"active": os.environ.get("D3") == "true", "code": extract_code(os.environ.get("C3"))},
-            "4": {"active": os.environ.get("D4") == "true", "code": extract_code(os.environ.get("C4"))},
-            "5": {"active": os.environ.get("D5") == "true", "code": extract_code(os.environ.get("C5"))}
+            "1": extract_code(os.environ.get("C1")),
+            "2": extract_code(os.environ.get("C2")),
+            "3": extract_code(os.environ.get("C3")),
+            "4": extract_code(os.environ.get("C4")),
+            "5": extract_code(os.environ.get("C5"))
           }
           
           includes =[]
-          for dev, info in devices.items():
-              if info["active"] and info["code"]:
-                  includes.append({"device": dev, "crd_code": info["code"]})
+          for dev, code in devices.items():
+              if code: # If a code exists, spawn the device
+                  includes.append({"device": dev, "crd_code": code})
           
           if not includes:
-              print("Error: No active devices with valid CRD codes provided. Exiting.")
+              print("Error: No valid CRD codes provided. Exiting.")
               exit(1)
               
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
@@ -164,13 +126,13 @@ jobs:
       - name: Start Chrome Remote Desktop Host
         env:
           CRD_CODE: ${{ matrix.crd_code }}
-          CRD_PIN: ${{ inputs.crd_pin }}
+          CRD_PIN: "112233"
           DEVICE_NAME: "macOS-Runner-Dev${{ matrix.device }}"
         run: |
           echo "Configuring Chrome Remote Desktop..."
           START_HOST="/Library/PrivilegedHelperTools/Google/ChromeRemoteDesktop/ChromeRemoteDesktopHost.app/Contents/MacOS/remoting_start_host"
           
-          if[ ! -f "$START_HOST" ]; then
+          if [ ! -f "$START_HOST" ]; then
             START_HOST=$(find /Library/PrivilegedHelperTools -name "remoting_start_host" 2>/dev/null | head -n 1)
           fi
           
@@ -201,7 +163,7 @@ jobs:
       - name: Automate GoLogin Login (macOS Native)
         env:
           GOLOGIN_EMAIL: ${{ inputs.gologin_email }}
-          GOLOGIN_PASSWORD: ${{ inputs.gologin_password }}
+          GOLOGIN_PASSWORD: "11223344"
         run: |
           echo "Waiting 15 seconds for GoLogin to load..."
           sleep 15
