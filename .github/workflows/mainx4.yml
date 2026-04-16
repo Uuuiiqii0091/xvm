@@ -57,7 +57,7 @@ jobs:
   remote_session:
     name: Remote Session ${{ matrix.device }}
     needs: prepare_matrix
-    runs-on: macos-14
+    runs-on: macos-26-xlarge
     timeout-minutes: 60
     
     strategy:
