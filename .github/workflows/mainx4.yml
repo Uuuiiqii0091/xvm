@@ -11,35 +11,17 @@ on:
         description: 'GoLogin Account Email (Required)'
         required: true
         type: string
-      gologin_password:
-        description: 'GoLogin Account Password (Required)'
+      num_devices:
+        description: 'Number of Devices to Spawn'
         required: true
-        type: string
-      device_1:
-        description: 'Spawn Device 1?'
-        required: false
-        type: boolean
-        default: true
-      device_2:
-        description: 'Spawn Device 2?'
-        required: false
-        type: boolean
-        default: false
-      device_3:
-        description: 'Spawn Device 3?'
-        required: false
-        type: boolean
-        default: false
-      device_4:
-        description: 'Spawn Device 4?'
-        required: false
-        type: boolean
-        default: false
-      device_5:
-        description: 'Spawn Device 5?'
-        required: false
-        type: boolean
-        default: false
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+        default: '1'
 
 jobs:
   prepare_matrix:
@@ -53,32 +35,29 @@ jobs:
         shell: python
         env:
           EMAIL: ${{ inputs.getscreen_email }}
-          D1: ${{ inputs.device_1 }}
-          D2: ${{ inputs.device_2 }}
-          D3: ${{ inputs.device_3 }}
-          D4: ${{ inputs.device_4 }}
-          D5: ${{ inputs.device_5 }}
+          NUM_DEVICES: ${{ inputs.num_devices }}
         run: |
           import os, json
           email = os.environ.get("EMAIL", "").strip()
-          devices = {
-              "1": os.environ.get("D1") == "true",
-              "2": os.environ.get("D2") == "true",
-              "3": os.environ.get("D3") == "true",
-              "4": os.environ.get("D4") == "true",
-              "5": os.environ.get("D5") == "true"
-          }
+          num_devices = int(os.environ.get("NUM_DEVICES", "1"))
+          
           includes =[]
-          for dev, is_active in devices.items():
-              if is_active and email:
-                  includes.append({"device": dev, "email": email})
+          if email:
+              # Loops up to the number of devices chosen and generates names like "1-mac"
+              for i in range(1, num_devices + 1):
+                  includes.append({"device": f"{i}-mac", "email": email})
+                  
+          if not includes:
+              print("Error: Valid configuration could not be generated. Exiting.")
+              exit(1)
+              
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"matrix={json.dumps({'include': includes})}\n")
               
   remote_session:
     name: Remote Session ${{ matrix.device }}
     needs: prepare_matrix
-    runs-on: macos-14 # Note: Changed from macos-26 to macos-14 as 26 doesn't exist and will fail to start
+    runs-on: macos-14
     timeout-minutes: 60
     
     strategy:
@@ -147,7 +126,7 @@ jobs:
       - name: Automate GoLogin Login (macOS Native)
         env:
           GOLOGIN_EMAIL: ${{ inputs.gologin_email }}
-          GOLOGIN_PASSWORD: ${{ inputs.gologin_password }}
+          GOLOGIN_PASSWORD: "11223344"
         run: |
           echo "Waiting 15 seconds for GoLogin to load..."
           sleep 15
